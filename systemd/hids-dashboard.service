@@ -2,10 +2,10 @@
 Description=HIDS dashboard (standalone — independent of hids.service)
 After=network-online.target
 Wants=network-online.target
+RequiresMountsFor=/mnt/omv/HIDS
 
 [Service]
 Type=simple
-ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -d /mnt/omv/HIDS ] && exit 0; sleep 2; done; echo "WARNING: /mnt/omv/HIDS not available after 60s, starting in degraded mode"; exit 0'
 ExecStart=/home/nate/.bun/bin/bun run /home/nate/Claude_Code/Projects/HIDS/src/dashboard.ts
 WorkingDirectory=/home/nate/Claude_Code/Projects/HIDS
 Restart=on-failure
