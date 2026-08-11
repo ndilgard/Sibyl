@@ -32,8 +32,9 @@ lives on the NAS at `/mnt/omv/HIDS/`, not in this repo.
 
 ```bash
 bun install
-bun src/cli.ts init          # build baselines for all four modules
-bun src/cli.ts test-email    # confirm Gmail alerting works
+bun link                     # registers the `hids` command globally (~/.bun/bin/hids)
+hids init                    # build baselines for all four modules
+hids test-email              # confirm Gmail alerting works
 ```
 
 ## Running persistently (24/7 while the PC is on)

@@ -4,6 +4,9 @@
   "description": "Custom lightweight Host Intrusion Detection System",
   "type": "module",
   "private": true,
+  "bin": {
+    "hids": "./src/cli.ts"
+  },
   "scripts": {
     "cli": "bun src/cli.ts",
     "daemon": "bun src/daemon.ts",

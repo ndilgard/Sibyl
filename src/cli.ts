@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { existsSync, unlinkSync } from "node:fs";
 import { createMailer } from "./alert/email.ts";
 import { AlertRecorder, safeCreateMailer } from "./alert/policy.ts";
