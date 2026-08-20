@@ -12,6 +12,7 @@ import {
 } from "../state/whitelist-store.ts";
 import { getOrCreateLinkSecret, signAlertToken } from "../web/link-auth.ts";
 import { type Mailer, MailerNotConfigured } from "./email.ts";
+import { formatDetailLines } from "./format-detail.ts";
 
 /** First non-internal private IPv4 found — used to build links in alert emails that work from
  * other devices on the home network (phone on home wifi), not just this host. Read fresh per
@@ -123,7 +124,8 @@ export class AlertRecorder {
 						secret && WHITELISTABLE_MODULES.includes(finding.module)
 							? `\nWhitelist: http://${ip}:${this.port}/api/whitelist-confirm?id=${id}&token=${signAlertToken(secret, id)}`
 							: "";
-					return `[${finding.module}] ${finding.severity.toUpperCase()}: ${finding.summary}\n${JSON.stringify(finding.detail, null, 2)}${whitelistLine}`;
+					const detailLines = formatDetailLines(finding.detail).join("\n");
+					return `[${finding.module}] ${finding.severity.toUpperCase()}: ${finding.summary}\n${detailLines}${whitelistLine}`;
 				})
 				.join("\n\n---\n\n");
 
