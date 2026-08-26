@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>HIDS Dashboard</title>
+<title>Sibyl Dashboard</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -98,6 +98,27 @@
   .wl-form .wl-value { flex: 1; min-width: 140px; }
   .wl-form .wl-note { width: 140px; }
   h2 { margin-top: 2rem; }
+  details.section { margin-top: 2rem; }
+  details.section summary {
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.5rem 0;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    user-select: none;
+  }
+  details.section summary::-webkit-details-marker { display: none; }
+  details.section summary::before {
+    content: "▸";
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  details.section[open] summary::before { transform: rotate(90deg); }
   .bulk-actions { margin: 0.5rem 0; }
   .bulk-actions button:disabled { opacity: 0.5; cursor: default; }
   input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
@@ -116,11 +137,16 @@
 </style>
 </head>
 <body>
-  <h1>HIDS Dashboard</h1>
+  <h1>Sibyl Dashboard</h1>
   <div id="liveness-banner" class="banner liveness ok">Loading…</div>
   <div id="banner" class="banner clear">Loading…</div>
   <div id="remote-banner" class="banner remote unknown" style="display:none"></div>
-  <div id="status" class="grid"></div>
+
+  <details class="section" open>
+    <summary>Module Status</summary>
+    <div id="status" class="grid"></div>
+  </details>
+
   <div class="filter-bar">
     <label>Module
       <select id="filter-module" onchange="applyFilters()">
@@ -144,18 +170,27 @@
     </label>
     <span class="filter-hint">Applies to Recent Alerts &amp; Suppressed Events below</span>
   </div>
-  <h2>Recent Alerts</h2>
-  <div class="bulk-actions">
-    <button id="bulk-whitelist-btn" onclick="bulkWhitelist()" disabled>Whitelist Selected (0)</button>
-  </div>
-  <div id="alerts"></div>
-  <h2>Whitelist</h2>
-  <div id="whitelist"></div>
-  <h2>Suppressed Events</h2>
-  <div class="bulk-actions">
-    <button id="bulk-unwhitelist-btn" onclick="bulkUnwhitelist()" disabled>Unwhitelist Selected (0)</button>
-  </div>
-  <div id="suppressed"></div>
+
+  <details class="section" open>
+    <summary>Recent Alerts</summary>
+    <div class="bulk-actions">
+      <button id="bulk-whitelist-btn" onclick="bulkWhitelist()" disabled>Whitelist Selected (0)</button>
+    </div>
+    <div id="alerts"></div>
+  </details>
+
+  <details class="section">
+    <summary>Whitelist</summary>
+    <div id="whitelist"></div>
+  </details>
+
+  <details class="section">
+    <summary>Suppressed Events</summary>
+    <div class="bulk-actions">
+      <button id="bulk-unwhitelist-btn" onclick="bulkUnwhitelist()" disabled>Unwhitelist Selected (0)</button>
+    </div>
+    <div id="suppressed"></div>
+  </details>
 
 <script>
 function formatDuration(ms) {
