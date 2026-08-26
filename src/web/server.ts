@@ -17,7 +17,10 @@ import {
 } from "../state/whitelist-store.ts";
 import { getOrCreateLinkSecret, verifyAlertToken } from "./link-auth.ts";
 
-function escapeHtml(s: unknown): string {
+/** Exported for reuse by policy.ts's HTML alert emails — same escaping need, same rule: any
+ * value that could contain attacker-influenced or AI-generated content must be escaped before
+ * landing in HTML, here or there. */
+export function escapeHtml(s: unknown): string {
 	return String(s).replace(
 		/[&<>"']/g,
 		(c) =>

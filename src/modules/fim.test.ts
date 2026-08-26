@@ -34,6 +34,12 @@ function config(overrides: Partial<HidsConfig["fim"]> = {}): HidsConfig {
 		},
 		alert: { debounceMs: 60000, emailOnNewBinary: false },
 		heartbeat: { enabled: false, url: "", intervalMs: 120000 },
+		agent: {
+			enabled: false,
+			model: "claude-sonnet-5",
+			intervalMs: 300000,
+			apiKeyEnvPath: "unused",
+		},
 	};
 }
 

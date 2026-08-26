@@ -30,6 +30,12 @@ export interface HidsConfig {
 		 * this only feeds the dashboard's remote-status card. */
 		apiKey?: string;
 	};
+	agent: {
+		enabled: boolean;
+		model: string;
+		intervalMs: number;
+		apiKeyEnvPath: string;
+	};
 }
 
 const CONFIG_PATH = join(import.meta.dir, "..", "config", "hids.config.json");
@@ -51,6 +57,12 @@ export function applyConfigDefaults(raw: HidsConfig): HidsConfig {
 	raw.network.alertOnUdp ??= false; // default off — UDP "listeners" are mostly ephemeral app noise (WebRTC/QUIC/DNS)
 	raw.fim.watchTrustedProcessBinaries ??= true;
 	raw.heartbeat ??= { enabled: false, url: "", intervalMs: 120000 };
+	raw.agent ??= {
+		enabled: false,
+		model: "claude-sonnet-5",
+		intervalMs: 300000,
+		apiKeyEnvPath: "credentials/anthropic.env",
+	};
 	return raw;
 }
 

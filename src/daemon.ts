@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { createTriageModule } from "./agent/triage.ts";
 import { createMailer } from "./alert/email.ts";
 import { AlertRecorder, safeCreateMailer } from "./alert/policy.ts";
 import { loadConfig } from "./config.ts";
@@ -55,6 +56,7 @@ async function main() {
 		auth: createAuthModule(ctx),
 		network: createNetworkModule(ctx),
 		heartbeat: createHeartbeatModule(ctx),
+		agent: createTriageModule(ctx),
 	};
 
 	for (const [name, mod] of Object.entries(modules)) {

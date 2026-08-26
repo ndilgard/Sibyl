@@ -26,6 +26,7 @@ function baseConfig(overrides: Partial<HidsConfig> = {}): HidsConfig {
 		},
 		alert: { debounceMs: 60000, emailOnNewBinary: false },
 		heartbeat: undefined as unknown as HidsConfig["heartbeat"],
+		agent: undefined as unknown as HidsConfig["agent"],
 		...overrides,
 	};
 }
@@ -78,6 +79,27 @@ describe("applyConfigDefaults", () => {
 		};
 		const config = baseConfig({ heartbeat: explicit });
 		expect(applyConfigDefaults(config).heartbeat).toEqual(explicit);
+	});
+
+	test("defaults agent to a disabled config when absent", () => {
+		const result = applyConfigDefaults(baseConfig());
+		expect(result.agent).toEqual({
+			enabled: false,
+			model: "claude-sonnet-5",
+			intervalMs: 300000,
+			apiKeyEnvPath: "credentials/anthropic.env",
+		});
+	});
+
+	test("preserves an explicit agent config", () => {
+		const explicit = {
+			enabled: true,
+			model: "claude-sonnet-5",
+			intervalMs: 120000,
+			apiKeyEnvPath: "credentials/anthropic.env",
+		};
+		const config = baseConfig({ agent: explicit });
+		expect(applyConfigDefaults(config).agent).toEqual(explicit);
 	});
 
 	test("leaves unrelated fields untouched", () => {

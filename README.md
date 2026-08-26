@@ -1,7 +1,10 @@
-# HIDS
+# Sibyl
 
-Custom lightweight Host Intrusion Detection System for a single personal Linux PC. Detection-only
-(read-only observers, no enforcement/blocking) across five modules:
+A custom lightweight Host Intrusion Detection System for a single personal Linux PC — named for the
+mythological prophetess who interpreted ambiguous signs, since that's what the AI triage layer
+(`src/agent/triage.ts`) does with borderline findings. Detection-only (read-only observers, no
+enforcement/blocking) across five monitoring modules, plus an agentic triage layer that reviews
+anything not clear-cut enough to page immediately:
 
 - **File integrity** — hashes a configurable watch list (`~/.ssh`, dotfiles, `/etc/passwd`,
   hal-skeleton's `credentials/` dir), real-time via `fs.watch` plus a periodic full re-walk
@@ -20,9 +23,15 @@ Custom lightweight Host Intrusion Detection System for a single personal Linux P
   compromised-but-familiar binary reaching genuinely new infrastructure still alerts, while a CDN
   handing out a different edge IP in an already-seen /24 (v4) or /48 (v6) doesn't re-alert.
 - **Heartbeat** — pings an external healthchecks.io dead-man's-switch every 2 minutes. This is the
-  one module that can detect HIDS itself going quiet (crashed, killed, or disabled by an attacker
+  one module that can detect Sibyl itself going quiet (crashed, killed, or disabled by an attacker
   with root) — nothing running only on this host can reliably report its own death, so the
   alerting-on-absence logic lives entirely outside this machine.
+- **Agent (triage)** — reviews `warning`/`info` findings the other modules recorded but never
+  emailed, using Claude to judge ALARMING vs. BENIGN and escalating genuine ones to email. Has
+  real tool use, not a single-shot classifier: can call `whois_lookup`/`reverse_dns_lookup` on an
+  unfamiliar network destination, or `check_package_ownership` (via `dpkg -S`) on a suspicious
+  binary path, before deciding. Fail-safe throughout — an API failure or unparseable response is
+  recorded as `unreviewed`, never silently dropped or treated as benign.
 
 **Only real triggers ever touch disk** — routine scans that find nothing are never persisted, so
 there's no retention/rotation job to maintain. All runtime data (baselines + the alerts database)
