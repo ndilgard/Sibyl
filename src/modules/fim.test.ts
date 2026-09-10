@@ -40,6 +40,12 @@ function config(overrides: Partial<HidsConfig["fim"]> = {}): HidsConfig {
 			intervalMs: 300000,
 			apiKeyEnvPath: "unused",
 		},
+		signatureDb: {
+			enabled: false,
+			feed: "recent",
+			refreshIntervalMs: 21600000,
+			authKeyEnvPath: "unused",
+		},
 	};
 }
 

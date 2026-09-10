@@ -7,14 +7,17 @@ import { createAuthModule } from "./modules/auth.ts";
 import { createFimModule } from "./modules/fim.ts";
 import { createNetworkModule } from "./modules/network.ts";
 import { createProcessModule } from "./modules/process.ts";
+import { createSignatureDbModule } from "./modules/signature-db.ts";
 import type { Module } from "./modules/types.ts";
 import { getAlerts, getScanStatus, openHistoryDb } from "./state/history-db.ts";
+import { createSignatureDbStore } from "./state/signature-db-store.ts";
 
 const BASELINE_FILES: Record<string, string | null> = {
 	fim: "baseline-fim.json",
 	process: "baseline-processes.json",
 	network: "baseline-network.json",
 	auth: null, // event-driven, no baseline file
+	signatureDb: "signature-db-cache.json",
 };
 
 /**
@@ -33,7 +36,8 @@ function buildContext() {
 		config.alert.debounceMs,
 		config.web.port,
 	);
-	return { config, db, recorder };
+	const signatureDb = createSignatureDbStore(config.dataDir);
+	return { config, db, recorder, signatureDb };
 }
 
 function buildModules(
@@ -44,14 +48,19 @@ function buildModules(
 		process: createProcessModule(ctx),
 		auth: createAuthModule(ctx),
 		network: createNetworkModule(ctx),
+		signatureDb: createSignatureDbModule(ctx),
 	};
 }
 
+// signatureDb is deliberately NOT in the default no-arg set below (same treatment as
+// heartbeat/agent) — it needs a MalwareBazaar Auth-Key configured first (see README), so
+// `hids init`/`hids scan-now` with no module arg must keep working for everyone else. Still
+// reachable explicitly: `hids init signatureDb` / `hids scan-now signatureDb`.
 function moduleNames(arg: string | undefined): string[] {
 	if (arg && arg in BASELINE_FILES) return [arg];
 	if (arg) {
 		console.error(
-			`Unknown module "${arg}". Valid: fim, process, auth, network`,
+			`Unknown module "${arg}". Valid: fim, process, auth, network, signatureDb`,
 		);
 		process.exit(1);
 	}
@@ -189,7 +198,9 @@ async function main() {
 			console.log(`Usage: hids <command>
 
 Commands:
-  init [module] [--force]   Build baseline (fim/process/network; auth has none)
+  init [module] [--force]   Build baseline (fim/process/network; auth has none). signatureDb not
+                            included by default — run \`hids init signatureDb\` once a
+                            MalwareBazaar Auth-Key is configured (see README)
   scan-now [module]         Run a one-off scan now (recorded to \`alerts\`, does not send email —
                             only the daemon sends real alert emails)
   status                    Show last-scan status per module

@@ -8,8 +8,10 @@ import { createFimModule } from "./modules/fim.ts";
 import { createHeartbeatModule } from "./modules/heartbeat.ts";
 import { createNetworkModule } from "./modules/network.ts";
 import { createProcessModule } from "./modules/process.ts";
+import { createSignatureDbModule } from "./modules/signature-db.ts";
 import type { Module } from "./modules/types.ts";
 import { openHistoryDb } from "./state/history-db.ts";
+import { createSignatureDbStore } from "./state/signature-db-store.ts";
 
 async function waitForDataDir(
 	dataDir: string,
@@ -49,7 +51,8 @@ async function main() {
 		config.web.port,
 	);
 
-	const ctx = { config, db, recorder };
+	const signatureDb = createSignatureDbStore(config.dataDir);
+	const ctx = { config, db, recorder, signatureDb };
 	const modules: Record<string, Module> = {
 		fim: createFimModule(ctx),
 		process: createProcessModule(ctx),
@@ -57,6 +60,7 @@ async function main() {
 		network: createNetworkModule(ctx),
 		heartbeat: createHeartbeatModule(ctx),
 		agent: createTriageModule(ctx),
+		signatureDb: createSignatureDbModule(ctx),
 	};
 
 	for (const [name, mod] of Object.entries(modules)) {

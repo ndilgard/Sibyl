@@ -10,6 +10,8 @@ ExecStart=/home/nate/.bun/bin/bun run /home/nate/Claude_Code/Projects/HIDS/src/d
 WorkingDirectory=/home/nate/Claude_Code/Projects/HIDS
 Restart=on-failure
 RestartSec=5
+MemoryHigh=1500M
+MemoryMax=2G
 
 [Install]
 WantedBy=default.target

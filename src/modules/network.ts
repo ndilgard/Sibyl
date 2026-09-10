@@ -1,7 +1,10 @@
 import { upsertScanStatus } from "../state/history-db.ts";
 import { readJson, writeJsonAtomic } from "../state/json-store.ts";
+import { noopSignatureDbStore } from "../state/signature-db-store.ts";
 import {
+	buildSuspiciousFinding,
 	checkSuspiciousExePath,
+	hashSuspiciousBinary,
 	resolveExePath,
 } from "./suspicious-process.ts";
 import type { Module, ModuleContext } from "./types.ts";
@@ -146,6 +149,7 @@ export function parseConnectedUdp(output: string): OutboundConn[] {
 
 export function createNetworkModule(ctx: ModuleContext): Module {
 	const { config, db, recorder } = ctx;
+	const signatureDb = ctx.signatureDb ?? noopSignatureDbStore();
 	const baselinePath = `${config.dataDir}/baseline-network.json`;
 	const outboundFirstSeenPath = `${config.dataDir}/outbound-first-seen.json`;
 	let timer: ReturnType<typeof setInterval> | null = null;
@@ -171,7 +175,7 @@ export function createNetworkModule(ctx: ModuleContext): Module {
 		for (const conn of conns) {
 			const pid = extractPid(conn.process);
 			const exePath = pid !== null ? resolveExePath(pid) : null;
-			if (!exePath) continue; // process exited between listing and resolving — can't attribute
+			if (pid === null || !exePath) continue; // process exited between listing and resolving — can't attribute
 
 			// Layer 1: a process already suspicious for existing (deleted binary / suspicious path) is
 			// ALWAYS alert-worthy the moment it talks to the network, no dedup — same as process.ts
@@ -181,11 +185,17 @@ export function createNetworkModule(ctx: ModuleContext): Module {
 				config.process.suspiciousDirs,
 			);
 			if (suspicious.suspicious) {
+				const sha256 = hashSuspiciousBinary(pid, suspicious);
+				const finding = buildSuspiciousFinding({
+					summaryBase: `Suspicious process (${suspicious.reason}) made an outbound connection: ${exePath} -> ${conn.peerAddress} (${conn.proto})`,
+					detail: { ...conn, exePath },
+					sha256,
+					match: sha256 ? signatureDb.lookup(sha256) : null,
+				});
 				recorder.record({
 					module: "network",
 					severity: "critical",
-					summary: `Suspicious process (${suspicious.reason}) made an outbound connection: ${exePath} -> ${conn.peerAddress} (${conn.proto})`,
-					detail: { ...conn, exePath },
+					...finding,
 				});
 				continue;
 			}

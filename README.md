@@ -26,6 +26,16 @@ anything not clear-cut enough to page immediately:
   one module that can detect Sibyl itself going quiet (crashed, killed, or disabled by an attacker
   with root) — nothing running only on this host can reliably report its own death, so the
   alerting-on-absence logic lives entirely outside this machine.
+- **Signature-DB** — hash-checks binaries the process/network modules already flagged suspicious
+  (deleted-on-disk, or running from `/tmp`/`/dev/shm`/`/var/tmp`) against a local cache of
+  known-malware SHA-256 hashes from abuse.ch MalwareBazaar's `recent.csv` feed (refreshed every 6h
+  by default). Enrichment only — a match never changes whether the alert fires, it adds
+  `MATCHES KNOWN MALWARE (<signature>)` to a summary that was already critical. A refresh failure
+  logs a warning and keeps serving the last-good cache rather than crashing or going silent.
+  Disabled by default (`signatureDb.enabled: false`) — requires a free MalwareBazaar Auth-Key (sign
+  up at [auth.abuse.ch](https://auth.abuse.ch/)) in `credentials/malwarebazaar.env`. Not included in
+  `hids init`/`hids scan-now`'s default module set until configured — run
+  `hids init signatureDb` / `hids scan-now signatureDb` explicitly once the key is in place.
 - **Agent (triage)** — reviews `warning`/`info` findings the other modules recorded but never
   emailed, using Claude to judge ALARMING vs. BENIGN and escalating genuine ones to email. Has
   real tool use, not a single-shot classifier: can call `whois_lookup`/`reverse_dns_lookup` on an

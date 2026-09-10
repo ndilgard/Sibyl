@@ -36,6 +36,15 @@ export interface HidsConfig {
 		intervalMs: number;
 		apiKeyEnvPath: string;
 	};
+	signatureDb: {
+		enabled: boolean;
+		/** "recent" = trailing 48h window, wholesale-replaced each refresh (default — matches the
+		 * atomic-cache storage convention with zero merge logic). "full" = abuse.ch's entire
+		 * database (~100MB, 900k+ hashes) — full coverage, much bigger/slower to refresh. */
+		feed: "recent" | "full";
+		refreshIntervalMs: number;
+		authKeyEnvPath: string;
+	};
 }
 
 const CONFIG_PATH = join(import.meta.dir, "..", "config", "hids.config.json");
@@ -62,6 +71,12 @@ export function applyConfigDefaults(raw: HidsConfig): HidsConfig {
 		model: "claude-sonnet-5",
 		intervalMs: 300000,
 		apiKeyEnvPath: "credentials/anthropic.env",
+	};
+	raw.signatureDb ??= {
+		enabled: false,
+		feed: "recent",
+		refreshIntervalMs: 6 * 60 * 60 * 1000,
+		authKeyEnvPath: "credentials/malwarebazaar.env",
 	};
 	return raw;
 }
