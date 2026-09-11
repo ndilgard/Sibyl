@@ -11,6 +11,7 @@ import { createProcessModule } from "./modules/process.ts";
 import { createSignatureDbModule } from "./modules/signature-db.ts";
 import type { Module } from "./modules/types.ts";
 import { openHistoryDb } from "./state/history-db.ts";
+import { createPackageLookup } from "./state/package-ownership.ts";
 import { createSignatureDbStore } from "./state/signature-db-store.ts";
 
 async function waitForDataDir(
@@ -52,7 +53,8 @@ async function main() {
 	);
 
 	const signatureDb = createSignatureDbStore(config.dataDir);
-	const ctx = { config, db, recorder, signatureDb };
+	const packageLookup = createPackageLookup();
+	const ctx = { config, db, recorder, signatureDb, packageLookup };
 	const modules: Record<string, Module> = {
 		fim: createFimModule(ctx),
 		process: createProcessModule(ctx),

@@ -4,11 +4,14 @@ import { loadEnv } from "../alert/email.ts";
 import type { Finding } from "../alert/policy.ts";
 import type { Module, ModuleContext } from "../modules/types.ts";
 import { type Alert, getAlerts } from "../state/history-db.ts";
+import { isPlausiblePath, queryDpkgOwner } from "../state/package-ownership.ts";
 import {
 	getTriagedAlertIds,
 	insertVerdict,
 	type Verdict,
 } from "../state/triage-store.ts";
+
+export { isPlausiblePath } from "../state/package-ownership.ts";
 
 /**
  * The AI triage layer: reviews warning/info findings that AlertRecorder never emails (see
@@ -109,18 +112,6 @@ export function isValidIp(s: string): boolean {
 	return ipv6.test(s) && s.includes(":") && s.length >= 3;
 }
 
-/** Sanity check before a path reaches `Bun.spawnSync(["dpkg", "-S", path])` — not primarily a
- * shell-injection concern (args array, not a shell string, is already immune to that), but bounds
- * length and requires an absolute path so the tool does only what it's for. Rejects null bytes
- * outright, since those are never valid in a real filesystem path and Bun.spawnSync (like Node)
- * throws on them anyway — better to fail with a clear "invalid tool input" than a cryptic runtime
- * error deeper in the call stack. */
-export function isPlausiblePath(s: string): boolean {
-	if (s.length === 0 || s.length > 4096) return false;
-	if (s.includes("\0")) return false;
-	return s.startsWith("/");
-}
-
 /** A tool runner receives the model's raw tool-call input and returns the text to feed back into
  * the conversation. Each runner owns its own input validation — the loop below never inspects
  * `input` itself, it only dispatches by tool name. */
@@ -130,7 +121,6 @@ export type ToolRunners = Record<
 >;
 
 const WHOIS_OUTPUT_MAX_CHARS = 2000;
-const DPKG_OUTPUT_MAX_CHARS = 500;
 
 /** The real, system-calling implementations — shells out to `whois`/`dpkg` (matching the existing
  * codebase convention of shelling out to system tools, e.g. `network.ts`'s `ss`, `auth.ts`'s
@@ -179,14 +169,10 @@ export function createSystemToolRunners(): ToolRunners {
 					`Refusing package-ownership check on implausible path: ${String(path)}`,
 				);
 			}
-			const result = Bun.spawnSync(["dpkg", "-S", path], { timeout: 10_000 });
-			if (result.exitCode !== 0) {
-				return "No installed package owns this path (dpkg -S found no match).";
-			}
-			const output = result.stdout.toString().trim();
-			return output.length > DPKG_OUTPUT_MAX_CHARS
-				? `${output.slice(0, DPKG_OUTPUT_MAX_CHARS)}\n...(truncated)`
-				: output;
+			const { owned, rawOutput } = queryDpkgOwner(path);
+			return owned
+				? rawOutput
+				: "No installed package owns this path (dpkg -S found no match).";
 		},
 	};
 }

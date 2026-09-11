@@ -10,6 +10,7 @@ import { createProcessModule } from "./modules/process.ts";
 import { createSignatureDbModule } from "./modules/signature-db.ts";
 import type { Module } from "./modules/types.ts";
 import { getAlerts, getScanStatus, openHistoryDb } from "./state/history-db.ts";
+import { createPackageLookup } from "./state/package-ownership.ts";
 import { createSignatureDbStore } from "./state/signature-db-store.ts";
 
 const BASELINE_FILES: Record<string, string | null> = {
@@ -37,7 +38,8 @@ function buildContext() {
 		config.web.port,
 	);
 	const signatureDb = createSignatureDbStore(config.dataDir);
-	return { config, db, recorder, signatureDb };
+	const packageLookup = createPackageLookup();
+	return { config, db, recorder, signatureDb, packageLookup };
 }
 
 function buildModules(

@@ -24,7 +24,11 @@ function config(overrides: Partial<HidsConfig["fim"]> = {}): HidsConfig {
 			watchTrustedProcessBinaries: false,
 			...overrides,
 		},
-		process: { pollIntervalMs: 10000, suspiciousDirs: [] },
+		process: {
+			pollIntervalMs: 10000,
+			suspiciousDirs: [],
+			packageUpgradeGraceDays: 10,
+		},
 		auth: { reconnectBackoffMs: 5000 },
 		network: {
 			pollIntervalMs: 30000,

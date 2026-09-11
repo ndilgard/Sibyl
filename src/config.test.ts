@@ -16,7 +16,11 @@ function baseConfig(overrides: Partial<HidsConfig> = {}): HidsConfig {
 			debounceMs: 2000,
 			watchTrustedProcessBinaries: undefined as unknown as boolean,
 		},
-		process: { pollIntervalMs: 10000, suspiciousDirs: ["/tmp"] },
+		process: {
+			pollIntervalMs: 10000,
+			suspiciousDirs: ["/tmp"],
+			packageUpgradeGraceDays: undefined as unknown as number,
+		},
 		auth: { reconnectBackoffMs: 5000 },
 		network: {
 			pollIntervalMs: 30000,
@@ -61,6 +65,17 @@ describe("applyConfigDefaults", () => {
 		expect(applyConfigDefaults(config).fim.watchTrustedProcessBinaries).toBe(
 			false,
 		);
+	});
+
+	test("defaults packageUpgradeGraceDays to 10 when absent", () => {
+		const result = applyConfigDefaults(baseConfig());
+		expect(result.process.packageUpgradeGraceDays).toBe(10);
+	});
+
+	test("preserves an explicit packageUpgradeGraceDays", () => {
+		const config = baseConfig();
+		config.process.packageUpgradeGraceDays = 3;
+		expect(applyConfigDefaults(config).process.packageUpgradeGraceDays).toBe(3);
 	});
 
 	test("defaults heartbeat to a disabled config when absent", () => {
