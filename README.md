@@ -11,7 +11,13 @@ anything not clear-cut enough to page immediately:
   safety net. `/etc/sudoers` is deliberately excluded — not readable by a normal user.
 - **Process** — polls `/proc` every 10s; flags anything running from `/tmp`/`/dev/shm`/`/var/tmp`
   or a deleted-on-disk binary immediately. New-but-legitimate binaries are absorbed into an
-  allowlist silently (no email, keeps this the noisy case in the polling world).
+  allowlist silently (no email, keeps this the noisy case in the polling world). A deleted-binary
+  finding is pre-filtered before it's recorded `critical`: if the path is owned by an installed
+  `dpkg` package that was upgraded (via `apt`) within `process.packageUpgradeGraceDays` (default 10
+  days), that's the routine "a process held an fd to a binary the last upgrade unlinked" shape, not
+  tampering — it's downgraded to `warning` instead (still logged, still reviewed by the agent
+  triage layer, never dropped). Any lookup failure — not dpkg-owned, not recently upgraded, or the
+  `dpkg`/`apt` history lookup itself failing — leaves it `critical`, unchanged from before.
 - **Auth** — streams `journalctl -f`; failed SSH logins, accepted SSH logins, and failed sudo
   attempts are always alert-worthy.
 - **Network** — polls every 30s. Listening ports (`ss -tulnp`): new TCP listeners always alert;
@@ -119,5 +125,10 @@ per-module intervals/thresholds.
 - No `auditd` installed, so process monitoring is polling-based (10s interval) — a process that
   spawns and exits between polls is invisible. `sudo apt install auditd` + execve rules would
   close this gap, out of scope for v1.
+- The deleted-binary package-upgrade pre-filter only reads the live `/var/log/apt/history.log`,
+  not rotated `history.log.<N>.gz` archives, and only does a simple "was this package touched by
+  apt within N days" recency check — not precise correlation with the deletion event itself
+  (deliberately rejected as too fragile; see `checkPackageUpgradeExplanation` in
+  `src/modules/process.ts`).
 - Dashboard has no auth and binds to `0.0.0.0` (LAN-reachable) — fine for a trusted home network,
   but don't port-forward it to the internet without adding real auth first.

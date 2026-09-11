@@ -19,7 +19,8 @@
   },
   "process": {
     "pollIntervalMs": 10000,
-    "suspiciousDirs": ["/tmp", "/dev/shm", "/var/tmp"]
+    "suspiciousDirs": ["/tmp", "/dev/shm", "/var/tmp"],
+    "packageUpgradeGraceDays": 10
   },
   "auth": {
     "reconnectBackoffMs": 5000

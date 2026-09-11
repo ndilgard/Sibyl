@@ -12,7 +12,14 @@ export interface HidsConfig {
 		debounceMs: number;
 		watchTrustedProcessBinaries: boolean;
 	};
-	process: { pollIntervalMs: number; suspiciousDirs: string[] };
+	process: {
+		pollIntervalMs: number;
+		suspiciousDirs: string[];
+		/** A deleted-on-disk-binary finding is downgraded from `critical` instead of alerting
+		 * instantly when the owning package was upgraded via apt within this many days — see
+		 * applyConfigDefaults() for why 10 was chosen as the default. */
+		packageUpgradeGraceDays: number;
+	};
 	auth: { reconnectBackoffMs: number };
 	network: {
 		pollIntervalMs: number;
@@ -65,6 +72,10 @@ function expandHome(path: string): string {
 export function applyConfigDefaults(raw: HidsConfig): HidsConfig {
 	raw.network.alertOnUdp ??= false; // default off — UDP "listeners" are mostly ephemeral app noise (WebRTC/QUIC/DNS)
 	raw.fim.watchTrustedProcessBinaries ??= true;
+	// 10 days: comfortably covers "ran `apt upgrade` a few days ago, the still-running old process
+	// finally got noticed/restarted this week" without so wide a window that it'd paper over an
+	// upgrade from a month ago being used to explain away something unrelated.
+	raw.process.packageUpgradeGraceDays ??= 10;
 	raw.heartbeat ??= { enabled: false, url: "", intervalMs: 120000 };
 	raw.agent ??= {
 		enabled: false,
