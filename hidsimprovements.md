@@ -43,6 +43,61 @@ Module/severity/text filters over Recent Alerts and Suppressed Events, re-render
 from already-fetched data (`86ac173`). Bulk select + whitelist/unwhitelist actions and the
 Suppressed Events audit view (`2236d28`, `1abf59e`) came out of this same round of dashboard work.
 
+## 6. Cross-module correlation + investigation report generator — SCOPED
+
+Right now each module fires alerts independently and the triage agent reasons about them one at
+a time. A related set of signals across modules — a FIM change followed seconds later by a new
+network connection, say — has no mechanism to be recognized as one incident. This item is really
+two things that turn out to be the same feature: build the correlation logic (group related
+alerts across modules by time/process/file proximity), then have the triage agent turn a
+correlated group into a single structured investigation report (timeline, evidence per module,
+one narrative) instead of separate per-alert emails. Matches a pattern seen repeatedly in
+detection-engineering job postings (case documentation, timeline reconstruction, evidence
+indexing) — also the single most direct way to make Sibyl demonstrate end-to-end investigative
+reasoning, not just alert-and-forward.
+
+**Scoped 2026-10-27, IN PROGRESS.** Full design (correlation logic, time window, trigger,
+storage, email surfacing, build order) in `~/.claude/plans/hids-cross-module-correlation.md` —
+read that back before continuing, don't re-derive.
+
+Steps 1-4 done (2026-11-09): `src/state/identifiers.ts`, `src/state/correlate.ts` (union-find
+grouping so an incident can chain through more than one shared identifier), and
+`src/state/incident-store.ts` (append-only JSONL, mirrors `triage-store.ts`) all built and
+tested — 29 tests passing. Next: step 5, extend `triage.ts` with the report-generation path.
+
+## 7. Human-confirmed response recommendations
+
+HIDS is deliberately detection-only — autonomous containment (killing a process, isolating the
+host) was already considered and rejected as high-risk, and would undercut the design's own
+prompt-injection mitigation (fail-safe-to-"unreviewed", never act unilaterally on LLM output).
+A safer middle ground: the triage agent drafts a specific recommended response ("kill PID 1234",
+"block 1.2.3.4 at the firewall") alongside its analysis, and a human confirms it via the same
+signed-link click-to-confirm pattern already used for whitelist-confirm. Gets the "automated
+response" capability recruiters look for without ever letting the LLM take action on its own.
+
+## 8. Scheduled hunt mode
+
+Every existing module (and the correlation/triage layer above) is reactive — it only reasons
+about things that already tripped a detection. A hunt mode would run on a schedule (e.g. nightly)
+and have the triage agent proactively query historical data/baselines for anomalies that never
+crossed an alert threshold on their own — the "go looking" complement to "wait for something to
+trip." Bigger lift than 6 or 7 since it needs a baseline/history store to query against rather
+than reacting to a single event; lower priority until the reactive path is mature.
+
+## 9. Whitelist prefix matching — SCOPED
+
+`whitelist-store.ts` only does exact-value matching, which breaks for any whitelisted identifier
+that changes by design on every update — confirmed recurring case: the Claude Code self-update
+daemon's `exePath` embeds its version number, so the existing rule (pinned to `2.1.241`) silently
+stopped working and 5 different version bumps (`2.1.241/310/311/312/316`) each re-triggered the
+same alert this session. Firefox and p11-kit hit a related but distinct issue (needing a *new*
+rule after an update, not a *structurally broken* one) and don't need this fix.
+
+**Scoped 2026-11-01, not started.** Full design (prefix vs. glob decision, exact code change,
+dashboard checkbox, test plan, migration of the dead Claude Code rule) in
+`~/.claude/plans/hids-whitelist-prefix-matching.md` — read that back before starting, don't
+re-derive.
+
 ## Other ideas raised in passing (not yet scoped)
 
 - Rootkit / hidden-process detection (kernel module loading, process list discrepancies)
