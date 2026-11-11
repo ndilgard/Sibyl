@@ -15,12 +15,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
-    "nodemailer": "^9.0.1"
+    "nodemailer": "^10.5.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",
     "@types/bun": "latest",
-    "@types/nodemailer": "^7.0.4",
+    "@types/nodemailer": "^8.0.2",
     "typescript": "^7.0.2"
   }
 }
