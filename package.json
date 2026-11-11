@@ -18,7 +18,9 @@
     "nodemailer": "^6.9.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
+    "@types/bun": "latest",
     "@types/nodemailer": "^6.4.0",
-    "@types/bun": "latest"
+    "typescript": "^7.0.2"
   }
 }

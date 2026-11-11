@@ -6,7 +6,7 @@ RequiresMountsFor=/mnt/omv/HIDS
 
 [Service]
 Type=simple
-ExecStart=/home/nate/.bun/bin/bun run /home/nate/Claude_Code/Projects/HIDS/src/daemon.ts
+ExecStart=/usr/bin/bun run /home/nate/Claude_Code/Projects/HIDS/src/daemon.ts
 WorkingDirectory=/home/nate/Claude_Code/Projects/HIDS
 Restart=on-failure
 RestartSec=5

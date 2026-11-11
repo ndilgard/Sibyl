@@ -154,6 +154,15 @@ export function createNetworkModule(ctx: ModuleContext): Module {
 	const outboundFirstSeenPath = `${config.dataDir}/outbound-first-seen.json`;
 	let timer: ReturnType<typeof setInterval> | null = null;
 
+	// Mirrors process.ts's alertedCriticalKeys: a still-running suspicious process (e.g. a
+	// self-updating binary whose old file was unlinked while the process kept running) alerts once
+	// per pid instead of once per poll cycle for every established connection it holds — without
+	// this, a long-lived process making outbound calls to a rotating set of CDN edge IPs (e.g. the
+	// daemon's own bun runtime calling api.anthropic.com) re-alerts every single poll, forever.
+	// Replaced wholesale each scan, so a pid that exits is pruned and free to alert again on
+	// recurrence (new pid, or the same pid reappearing suspicious another way).
+	let alertedSuspiciousKeys = new Set<string>();
+
 	function checkOutbound(
 		conns: OutboundConn[],
 		isFirstOutboundRun: boolean,
@@ -171,6 +180,7 @@ export function createNetworkModule(ctx: ModuleContext): Module {
 			{},
 		);
 		let newPairs = 0;
+		const currentSuspiciousKeys = new Set<string>();
 
 		for (const conn of conns) {
 			const pid = extractPid(conn.process);
@@ -178,25 +188,32 @@ export function createNetworkModule(ctx: ModuleContext): Module {
 			if (pid === null || !exePath) continue; // process exited between listing and resolving — can't attribute
 
 			// Layer 1: a process already suspicious for existing (deleted binary / suspicious path) is
-			// ALWAYS alert-worthy the moment it talks to the network, no dedup — same as process.ts
-			// never lets a suspicious binary go quiet just because we've seen it before.
+			// alert-worthy the moment it talks to the network — but deduped per pid+reason+exePath,
+			// mirroring process.ts's alertedCriticalKeys, so a long-lived offender (e.g. a self-updating
+			// binary whose old file was unlinked while the process kept running) alerts once instead of
+			// once per poll cycle for every established connection and every rotating CDN edge IP it
+			// talks to. A fresh pid (process restarted) or a new suspicious reason still alerts again.
 			const suspicious = checkSuspiciousExePath(
 				exePath,
 				config.process.suspiciousDirs,
 			);
 			if (suspicious.suspicious) {
-				const sha256 = hashSuspiciousBinary(pid, suspicious);
-				const finding = buildSuspiciousFinding({
-					summaryBase: `Suspicious process (${suspicious.reason}) made an outbound connection: ${exePath} -> ${conn.peerAddress} (${conn.proto})`,
-					detail: { ...conn, exePath },
-					sha256,
-					match: sha256 ? signatureDb.lookup(sha256) : null,
-				});
-				recorder.record({
-					module: "network",
-					severity: "critical",
-					...finding,
-				});
+				const key = `${suspicious.reason}:${pid}:${exePath}`;
+				currentSuspiciousKeys.add(key);
+				if (!alertedSuspiciousKeys.has(key)) {
+					const sha256 = hashSuspiciousBinary(pid, suspicious);
+					const finding = buildSuspiciousFinding({
+						summaryBase: `Suspicious process (${suspicious.reason}) made an outbound connection: ${exePath} -> ${conn.peerAddress} (${conn.proto})`,
+						detail: { ...conn, exePath },
+						sha256,
+						match: sha256 ? signatureDb.lookup(sha256) : null,
+					});
+					recorder.record({
+						module: "network",
+						severity: "critical",
+						...finding,
+					});
+				}
 				continue;
 			}
 
@@ -225,6 +242,7 @@ export function createNetworkModule(ctx: ModuleContext): Module {
 		}
 
 		writeJsonAtomic(outboundFirstSeenPath, firstSeen);
+		alertedSuspiciousKeys = currentSuspiciousKeys;
 		return newPairs;
 	}
 

@@ -1,5 +1,7 @@
 # Sibyl
 
+© Nate Dilgard. All rights reserved — shared publicly as a portfolio project, not licensed for reuse, modification, or redistribution.
+
 A custom lightweight Host Intrusion Detection System for a single personal Linux PC — named for the
 mythological prophetess who interpreted ambiguous signs, since that's what the AI triage layer
 (`src/agent/triage.ts`) does with borderline findings. Detection-only (read-only observers, no
