@@ -112,7 +112,7 @@ export function createFimModule(ctx: ModuleContext): Module {
 				watchers.push(watcher);
 				watchedTrustedPaths.add(path);
 			} catch (err) {
-				console.warn(`[fim] failed to watch trusted binary ${path}:`, err);
+				console.warn("[fim] failed to watch trusted binary:", path, err);
 			}
 		}
 	}
@@ -240,7 +240,8 @@ export function createFimModule(ctx: ModuleContext): Module {
 				watchers.push(watcher);
 			} catch (err) {
 				console.warn(
-					`[fim] failed to watch ${root}, relying on periodic reconcile only:`,
+					"[fim] failed to watch, relying on periodic reconcile only:",
+					root,
 					err,
 				);
 			}

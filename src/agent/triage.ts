@@ -130,7 +130,20 @@ export type ToolRunners = Record<
 >;
 
 const WHOIS_OUTPUT_MAX_CHARS = 2000;
-const DPKG_OUTPUT_MAX_CHARS = 500;
+const PACKAGE_OWNER_OUTPUT_MAX_CHARS = 500;
+
+/** Package managers to try, in order, for a file-ownership lookup. Each entry's args find
+ * what package (if any) owns a given path; a nonzero exit means "not found" for that manager,
+ * not an error, so the next one is tried. Covers Debian/Ubuntu (dpkg), Arch (pacman), and
+ * Fedora/RHEL (rpm) so this works in CI (ubuntu) and locally regardless of distro. */
+const PACKAGE_OWNER_QUERIES: ReadonlyArray<{
+	cmd: string;
+	args: (path: string) => string[];
+}> = [
+	{ cmd: "dpkg", args: (path) => ["-S", path] },
+	{ cmd: "pacman", args: (path) => ["-Qo", path] },
+	{ cmd: "rpm", args: (path) => ["-qf", path] },
+];
 
 /** The real, system-calling implementations — shells out to `whois`/`dpkg` (matching the existing
  * codebase convention of shelling out to system tools, e.g. `network.ts`'s `ss`, `auth.ts`'s
@@ -179,14 +192,24 @@ export function createSystemToolRunners(): ToolRunners {
 					`Refusing package-ownership check on implausible path: ${String(path)}`,
 				);
 			}
-			const result = Bun.spawnSync(["dpkg", "-S", path], { timeout: 10_000 });
-			if (result.exitCode !== 0) {
-				return "No installed package owns this path (dpkg -S found no match).";
+			for (const { cmd, args } of PACKAGE_OWNER_QUERIES) {
+				try {
+					const result = Bun.spawnSync([cmd, ...args(path)], {
+						timeout: 10_000,
+					});
+					if (result.exitCode !== 0) continue;
+					const output = result.stdout.toString().trim();
+					return output.length > PACKAGE_OWNER_OUTPUT_MAX_CHARS
+						? `${output.slice(0, PACKAGE_OWNER_OUTPUT_MAX_CHARS)}\n...(truncated)`
+						: output;
+				} catch (err) {
+					if ((err as { code?: string } | undefined)?.code === "ENOENT") {
+						continue;
+					}
+					throw err;
+				}
 			}
-			const output = result.stdout.toString().trim();
-			return output.length > DPKG_OUTPUT_MAX_CHARS
-				? `${output.slice(0, DPKG_OUTPUT_MAX_CHARS)}\n...(truncated)`
-				: output;
+			return "No installed package owns this path.";
 		},
 	};
 }

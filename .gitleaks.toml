@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+# Known historical leak: an API key committed to config/hids.config.json on
+# 2026-07-29 (commit 2e9c36b), before that file was untracked and gitignored
+# in 2698d9b ("Stop tracking config/hids.config.json — contains live
+# secrets"). The secret can't be removed from history without a disruptive
+# force-push rewrite, so it's allowlisted here rather than re-flagged on
+# every push. The key must still be rotated at its source service.
+[allowlist]
+  commits = ["2e9c36b003e39411dded1e55d287cd364ab6561e"]
