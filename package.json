@@ -1,7 +1,7 @@
 {
   "name": "hids",
   "version": "0.1.0",
-  "description": "Custom lightweight Host Intrusion Detection System",
+  "description": "Sibyl — a custom lightweight Host Intrusion Detection System",
   "type": "module",
   "private": true,
   "bin": {
@@ -14,10 +14,13 @@
     "test": "bun test"
   },
   "dependencies": {
-    "nodemailer": "^6.9.0"
+    "@anthropic-ai/sdk": "^0.120.0",
+    "nodemailer": "^10.5.0"
   },
   "devDependencies": {
-    "@types/nodemailer": "^6.4.0",
-    "@types/bun": "latest"
+    "@biomejs/biome": "^2.6.6",
+    "@types/bun": "latest",
+    "@types/nodemailer": "^8.0.2",
+    "typescript": "^7.0.2"
   }
 }

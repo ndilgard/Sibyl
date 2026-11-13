@@ -1,7 +1,12 @@
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { upsertScanStatus } from "../state/history-db.ts";
 import { readJson, writeJsonAtomic } from "../state/json-store.ts";
-import { checkSuspiciousExePath } from "./suspicious-process.ts";
+import { noopSignatureDbStore } from "../state/signature-db-store.ts";
+import {
+	buildSuspiciousFinding,
+	checkSuspiciousExePath,
+	hashSuspiciousBinary,
+} from "./suspicious-process.ts";
 import type { Module, ModuleContext } from "./types.ts";
 
 interface ProcInfo {
@@ -40,14 +45,23 @@ function readProcs(): ProcInfo[] {
 
 export function createProcessModule(ctx: ModuleContext): Module {
 	const { config, db, recorder } = ctx;
+	const signatureDb = ctx.signatureDb ?? noopSignatureDbStore();
 	const baselinePath = `${config.dataDir}/baseline-processes.json`;
 	let timer: ReturnType<typeof setInterval> | null = null;
+
+	// Tracks which pid+condition pairs already alerted, so a still-running offender (e.g. a
+	// self-updating binary whose old file was unlinked while the process kept running) alerts once
+	// instead of every poll cycle (config.process.pollIntervalMs) for as long as it's alive. Replaced
+	// wholesale each scan rather than merged, so a pid that exits (or whose condition clears) is
+	// automatically pruned and free to alert again if the condition recurs on a new pid.
+	let alertedCriticalKeys = new Set<string>();
 
 	async function scanNow(): Promise<void> {
 		const knownExePaths = new Set(readJson<string[]>(baselinePath, []));
 		const isFirstRun = knownExePaths.size === 0;
 		const procs = readProcs();
 		let newExePaths = 0;
+		const currentCriticalKeys = new Set<string>();
 
 		for (const proc of procs) {
 			if (!proc.exePath) continue;
@@ -63,21 +77,41 @@ export function createProcessModule(ctx: ModuleContext): Module {
 			);
 
 			if (check.reason === "deleted") {
-				recorder.record({
-					module: "process",
-					severity: "critical",
-					summary: `Process running from a deleted binary: ${proc.exePath} (pid ${proc.pid})`,
-					detail: proc,
-				});
+				const key = `deleted:${proc.pid}:${proc.exePath}`;
+				currentCriticalKeys.add(key);
+				if (!alertedCriticalKeys.has(key)) {
+					const sha256 = hashSuspiciousBinary(proc.pid, check);
+					const finding = buildSuspiciousFinding({
+						summaryBase: `Process running from a deleted binary: ${proc.exePath} (pid ${proc.pid})`,
+						detail: proc,
+						sha256,
+						match: sha256 ? signatureDb.lookup(sha256) : null,
+					});
+					recorder.record({
+						module: "process",
+						severity: "critical",
+						...finding,
+					});
+				}
 				continue;
 			}
 			if (check.reason === "suspicious-path") {
-				recorder.record({
-					module: "process",
-					severity: "critical",
-					summary: `Process launched from suspicious path: ${proc.exePath} (pid ${proc.pid})`,
-					detail: proc,
-				});
+				const key = `suspicious-path:${proc.pid}:${proc.exePath}`;
+				currentCriticalKeys.add(key);
+				if (!alertedCriticalKeys.has(key)) {
+					const sha256 = hashSuspiciousBinary(proc.pid, check);
+					const finding = buildSuspiciousFinding({
+						summaryBase: `Process launched from suspicious path: ${proc.exePath} (pid ${proc.pid})`,
+						detail: proc,
+						sha256,
+						match: sha256 ? signatureDb.lookup(sha256) : null,
+					});
+					recorder.record({
+						module: "process",
+						severity: "critical",
+						...finding,
+					});
+				}
 				continue;
 			}
 
@@ -90,6 +124,7 @@ export function createProcessModule(ctx: ModuleContext): Module {
 			}
 		}
 
+		alertedCriticalKeys = currentCriticalKeys;
 		writeJsonAtomic(baselinePath, [...knownExePaths]);
 		upsertScanStatus(
 			db,

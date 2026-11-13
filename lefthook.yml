@@ -1,0 +1,29 @@
+# The gates on YOUR machine. The same gates run again on GitHub (.github/workflows/ci.yml),
+# where a red result blocks the merge — so skipping a hook here only moves the red to the PR.
+#
+# Install once per clone:  bunx lefthook install
+# Needs on this machine:   bun · semgrep · gitleaks   (pacman -S gitleaks; yay -S semgrep-bin)
+
+pre-commit:
+  piped: true
+  jobs:
+    - name: biome
+      glob: "**/*.ts"
+      run: bunx @biomejs/biome check --write {staged_files}
+      stage_fixed: true
+    - name: tests
+      run: bun test
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: typecheck
+      run: bunx tsc --noEmit
+    - name: tests
+      run: bun test
+    # Is the code written dangerously? Registry rules, no account needed. --error: findings fail the push.
+    - name: semgrep
+      run: semgrep scan --config auto --error --timeout 15 src/
+    # Did a secret get in? Walks the whole history: a key committed once and deleted is still a leak.
+    - name: gitleaks
+      run: gitleaks git --no-banner --redact

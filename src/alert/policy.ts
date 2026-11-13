@@ -11,7 +11,9 @@ import {
 	WHITELISTABLE_MODULES,
 } from "../state/whitelist-store.ts";
 import { getOrCreateLinkSecret, signAlertToken } from "../web/link-auth.ts";
+import { escapeHtml } from "../web/server.ts";
 import { type Mailer, MailerNotConfigured } from "./email.ts";
+import { formatDetailLines } from "./format-detail.ts";
 
 /** First non-internal private IPv4 found — used to build links in alert emails that work from
  * other devices on the home network (phone on home wifi), not just this host. Read fresh per
@@ -41,8 +43,16 @@ export interface Finding {
  * finding, so a burst (e.g. a whole watched directory deleted) doesn't flood the inbox.
  */
 export class AlertRecorder {
-	private pending: { id: string; finding: Finding }[] = [];
+	private pending: { id: string; finding: Finding; aiReasoning?: string }[] =
+		[];
 	private timer: ReturnType<typeof setTimeout> | null = null;
+	// Set on the first item of a batch, cleared on flush. Bounds how long a *sustained* stream of
+	// findings (each one resetting the trailing debounce below) can delay the email — without this,
+	// findings arriving faster than debounceMs apart reset the timer forever and flush() never runs.
+	// (Real incident: a still-running process kept re-triggering a critical every 10s, which is
+	// faster than the 45s debounce, and starved the email indefinitely.)
+	private batchStartedAt: number | null = null;
+	private static readonly MAX_BATCH_WAIT_MULTIPLIER = 3;
 
 	constructor(
 		private db: HistoryStore,
@@ -50,6 +60,19 @@ export class AlertRecorder {
 		private debounceMs: number,
 		private port: number,
 	) {}
+
+	/** Trailing debounce with a hard cap: resets on every new item like a plain debounce (so a
+	 * short burst still batches into one email), but never lets the wait exceed maxWaitMs from the
+	 * first item in the batch, so a sustained stream still flushes periodically. */
+	private schedule(): void {
+		const now = Date.now();
+		if (this.batchStartedAt === null) this.batchStartedAt = now;
+		const maxWaitMs = this.debounceMs * AlertRecorder.MAX_BATCH_WAIT_MULTIPLIER;
+		const remaining = maxWaitMs - (now - this.batchStartedAt);
+		if (this.timer) clearTimeout(this.timer);
+		const delay = Math.max(0, Math.min(this.debounceMs, remaining));
+		this.timer = setTimeout(() => void this.flush(), delay);
+	}
 
 	record(finding: Finding): void {
 		const whitelisted = findMatchingRule(
@@ -90,14 +113,26 @@ export class AlertRecorder {
 		if (finding.severity !== "critical") return;
 
 		this.pending.push({ id, finding });
-		if (this.timer) clearTimeout(this.timer);
-		this.timer = setTimeout(() => void this.flush(), this.debounceMs);
+		this.schedule();
+	}
+
+	/**
+	 * Escalates a finding the AI triage layer judged "alarming" — the finding was already
+	 * recorded (as warning/info) by an earlier record() call, so this reuses that existing alert
+	 * id rather than inserting a new row. Shares the same debounce/batch/mailer flow as record()'s
+	 * critical path so an escalated finding can land in the same email as a simultaneous critical
+	 * one, rather than duplicating the batching logic.
+	 */
+	escalate(alertId: string, finding: Finding, reasoning: string): void {
+		this.pending.push({ id: alertId, finding, aiReasoning: reasoning });
+		this.schedule();
 	}
 
 	private async flush(): Promise<void> {
 		const batch = this.pending;
 		this.pending = [];
 		this.timer = null;
+		this.batchStartedAt = null;
 		if (batch.length === 0) return;
 
 		if (!this.mailer) {
@@ -118,17 +153,51 @@ export class AlertRecorder {
 		const body =
 			linkHeader +
 			batch
-				.map(({ id, finding }) => {
+				.map(({ id, finding, aiReasoning }) => {
 					const whitelistLine =
 						secret && WHITELISTABLE_MODULES.includes(finding.module)
 							? `\nWhitelist: http://${ip}:${this.port}/api/whitelist-confirm?id=${id}&token=${signAlertToken(secret, id)}`
 							: "";
-					return `[${finding.module}] ${finding.severity.toUpperCase()}: ${finding.summary}\n${JSON.stringify(finding.detail, null, 2)}${whitelistLine}`;
+					// Reasoning content goes on its own following line(s), not inline after the label —
+					// the AI is prompted to format it as a bulleted list, and gluing the first bullet
+					// onto the same line as "AI reasoning:" reads badly once there's more than one point.
+					const reasoningLine = aiReasoning
+						? `\nAI reasoning:\n${aiReasoning}`
+						: "";
+					const detailLines = formatDetailLines(finding.detail).join("\n");
+					return `[${finding.module}] ${finding.severity.toUpperCase()}: ${finding.summary}\n${detailLines}${reasoningLine}${whitelistLine}`;
 				})
 				.join("\n\n---\n\n");
 
+		// HTML companion to the plain-text body above — nodemailer/most email clients prefer this
+		// when present, falling back to `text` otherwise. Every value pulled from `finding` or AI
+		// output goes through escapeHtml() first: alert detail and AI reasoning can both contain
+		// attacker-influenced or model-generated content, and unescaped HTML in an email is a real
+		// injection surface, not just a formatting nicety.
+		const linkHeaderHtml = ip
+			? `<p><strong>Dashboard:</strong> <a href="http://${ip}:${this.port}/">http://${ip}:${this.port}/</a></p>`
+			: "";
+		const htmlBody =
+			linkHeaderHtml +
+			batch
+				.map(({ id, finding, aiReasoning }) => {
+					const whitelistHtml =
+						secret && WHITELISTABLE_MODULES.includes(finding.module)
+							? `<p><strong>Whitelist:</strong> <a href="http://${ip}:${this.port}/api/whitelist-confirm?id=${id}&token=${signAlertToken(secret, id)}">Whitelist this</a></p>`
+							: "";
+					const reasoningHtml = aiReasoning
+						? `<p><strong>AI reasoning:</strong><br>${escapeHtml(aiReasoning).replace(/\n/g, "<br>")}</p>`
+						: "";
+					const detailHtml = formatDetailLines(finding.detail)
+						.map((line) => escapeHtml(line))
+						.join("<br>");
+					const headerHtml = `<p><strong>[${escapeHtml(finding.module)}] ${finding.severity.toUpperCase()}:</strong> ${escapeHtml(finding.summary)}</p>`;
+					return `${headerHtml}<p>${detailHtml}</p>${reasoningHtml}${whitelistHtml}`;
+				})
+				.join("<hr>");
+
 		try {
-			await this.mailer.send(subject, body);
+			await this.mailer.send(subject, body, htmlBody);
 			for (const { id } of batch) markEmailed(this.db, id);
 		} catch (err) {
 			console.error("[alert] failed to send alert email:", err);

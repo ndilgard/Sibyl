@@ -34,6 +34,18 @@ function config(overrides: Partial<HidsConfig["fim"]> = {}): HidsConfig {
 		},
 		alert: { debounceMs: 60000, emailOnNewBinary: false },
 		heartbeat: { enabled: false, url: "", intervalMs: 120000 },
+		agent: {
+			enabled: false,
+			model: "claude-sonnet-5",
+			intervalMs: 300000,
+			apiKeyEnvPath: "unused",
+		},
+		signatureDb: {
+			enabled: false,
+			feed: "recent",
+			refreshIntervalMs: 21600000,
+			authKeyEnvPath: "unused",
+		},
 	};
 }
 
@@ -96,6 +108,24 @@ describe("fim scanNow", () => {
 		expect(alerts).toHaveLength(1);
 		expect(alerts[0]!.severity).toBe("critical");
 		expect(alerts[0]!.summary).toContain("Watched file deleted");
+	});
+
+	test("deleting a trusted-process binary is a warning, not critical", async () => {
+		const path = join(watchDir, "trusted-app");
+		writeFileSync(path, "binary contents");
+		ctx.config = config({ watchTrustedProcessBinaries: true });
+		writeFileSync(
+			join(dataDir, "outbound-first-seen.json"),
+			JSON.stringify({ [path]: { firstSeenAt: "2026-01-01T00:00:00.000Z" } }),
+		);
+		const fim = createFimModule(ctx);
+		await fim.scanNow(); // baseline includes tracked.txt + trusted-app
+		rmSync(path);
+		await fim.scanNow();
+		const alerts = getAlerts(ctx.db, { module: "fim" });
+		expect(alerts).toHaveLength(1);
+		expect(alerts[0]!.severity).toBe("warning");
+		expect(alerts[0]!.summary).toContain("Trusted process binary removed");
 	});
 
 	test("an unchanged file never alerts across repeated scans", async () => {

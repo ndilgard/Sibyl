@@ -59,7 +59,7 @@ export function parseLines(chunk: string): JournalEntry[] {
 
 export function createAuthModule(ctx: ModuleContext): Module {
 	const { db, recorder, config } = ctx;
-	let proc: ReturnType<typeof Bun.spawn> | null = null;
+	let proc: Bun.ReadableSubprocess | null = null;
 	let stopped = false;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 

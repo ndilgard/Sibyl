@@ -1,7 +1,12 @@
-# HIDS
+# Sibyl
 
-Custom lightweight Host Intrusion Detection System for a single personal Linux PC. Detection-only
-(read-only observers, no enforcement/blocking) across five modules:
+© Nate Dilgard. All rights reserved — shared publicly as a portfolio project, not licensed for reuse, modification, or redistribution.
+
+A custom lightweight Host Intrusion Detection System for a single personal Linux PC — named for the
+mythological prophetess who interpreted ambiguous signs, since that's what the AI triage layer
+(`src/agent/triage.ts`) does with borderline findings. Detection-only (read-only observers, no
+enforcement/blocking) across five monitoring modules, plus an agentic triage layer that reviews
+anything not clear-cut enough to page immediately:
 
 - **File integrity** — hashes a configurable watch list (`~/.ssh`, dotfiles, `/etc/passwd`,
   hal-skeleton's `credentials/` dir), real-time via `fs.watch` plus a periodic full re-walk
@@ -20,9 +25,25 @@ Custom lightweight Host Intrusion Detection System for a single personal Linux P
   compromised-but-familiar binary reaching genuinely new infrastructure still alerts, while a CDN
   handing out a different edge IP in an already-seen /24 (v4) or /48 (v6) doesn't re-alert.
 - **Heartbeat** — pings an external healthchecks.io dead-man's-switch every 2 minutes. This is the
-  one module that can detect HIDS itself going quiet (crashed, killed, or disabled by an attacker
+  one module that can detect Sibyl itself going quiet (crashed, killed, or disabled by an attacker
   with root) — nothing running only on this host can reliably report its own death, so the
   alerting-on-absence logic lives entirely outside this machine.
+- **Signature-DB** — hash-checks binaries the process/network modules already flagged suspicious
+  (deleted-on-disk, or running from `/tmp`/`/dev/shm`/`/var/tmp`) against a local cache of
+  known-malware SHA-256 hashes from abuse.ch MalwareBazaar's `recent.csv` feed (refreshed every 6h
+  by default). Enrichment only — a match never changes whether the alert fires, it adds
+  `MATCHES KNOWN MALWARE (<signature>)` to a summary that was already critical. A refresh failure
+  logs a warning and keeps serving the last-good cache rather than crashing or going silent.
+  Disabled by default (`signatureDb.enabled: false`) — requires a free MalwareBazaar Auth-Key (sign
+  up at [auth.abuse.ch](https://auth.abuse.ch/)) in `credentials/malwarebazaar.env`. Not included in
+  `hids init`/`hids scan-now`'s default module set until configured — run
+  `hids init signatureDb` / `hids scan-now signatureDb` explicitly once the key is in place.
+- **Agent (triage)** — reviews `warning`/`info` findings the other modules recorded but never
+  emailed, using Claude to judge ALARMING vs. BENIGN and escalating genuine ones to email. Has
+  real tool use, not a single-shot classifier: can call `whois_lookup`/`reverse_dns_lookup` on an
+  unfamiliar network destination, or `check_package_ownership` (via `dpkg -S`) on a suspicious
+  binary path, before deciding. Fail-safe throughout — an API failure or unparseable response is
+  recorded as `unreviewed`, never silently dropped or treated as benign.
 
 **Only real triggers ever touch disk** — routine scans that find nothing are never persisted, so
 there's no retention/rotation job to maintain. All runtime data (baselines + the alerts database)

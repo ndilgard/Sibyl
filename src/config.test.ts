@@ -26,6 +26,8 @@ function baseConfig(overrides: Partial<HidsConfig> = {}): HidsConfig {
 		},
 		alert: { debounceMs: 60000, emailOnNewBinary: false },
 		heartbeat: undefined as unknown as HidsConfig["heartbeat"],
+		agent: undefined as unknown as HidsConfig["agent"],
+		signatureDb: undefined as unknown as HidsConfig["signatureDb"],
 		...overrides,
 	};
 }
@@ -78,6 +80,48 @@ describe("applyConfigDefaults", () => {
 		};
 		const config = baseConfig({ heartbeat: explicit });
 		expect(applyConfigDefaults(config).heartbeat).toEqual(explicit);
+	});
+
+	test("defaults agent to a disabled config when absent", () => {
+		const result = applyConfigDefaults(baseConfig());
+		expect(result.agent).toEqual({
+			enabled: false,
+			model: "claude-sonnet-5",
+			intervalMs: 300000,
+			apiKeyEnvPath: "credentials/anthropic.env",
+		});
+	});
+
+	test("preserves an explicit agent config", () => {
+		const explicit = {
+			enabled: true,
+			model: "claude-sonnet-5",
+			intervalMs: 120000,
+			apiKeyEnvPath: "credentials/anthropic.env",
+		};
+		const config = baseConfig({ agent: explicit });
+		expect(applyConfigDefaults(config).agent).toEqual(explicit);
+	});
+
+	test("defaults signatureDb to a disabled config when absent", () => {
+		const result = applyConfigDefaults(baseConfig());
+		expect(result.signatureDb).toEqual({
+			enabled: false,
+			feed: "recent",
+			refreshIntervalMs: 6 * 60 * 60 * 1000,
+			authKeyEnvPath: "credentials/malwarebazaar.env",
+		});
+	});
+
+	test("preserves an explicit signatureDb config", () => {
+		const explicit: HidsConfig["signatureDb"] = {
+			enabled: true,
+			feed: "full",
+			refreshIntervalMs: 3600000,
+			authKeyEnvPath: "credentials/malwarebazaar.env",
+		};
+		const config = baseConfig({ signatureDb: explicit });
+		expect(applyConfigDefaults(config).signatureDb).toEqual(explicit);
 	});
 
 	test("leaves unrelated fields untouched", () => {

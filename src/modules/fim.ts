@@ -65,18 +65,23 @@ function buildBaseline(watchPaths: string[]): Baseline {
 }
 
 /**
- * Every binary the network module has ever trusted (outbound-first-seen.json's top-level keys) —
- * closes the "trust once forever" gap's tampering half: even after the network layer has gone
- * permanently quiet on a binary, FIM keeps hashing it and alerts if its content ever changes.
- * Only reads the key set, not the (now nested, per-destination) values, so this stays unaffected
- * by how network.ts structures its own trust data internally.
+ * Every binary the network module has ever trusted (outbound-first-seen.json's top-level keys),
+ * regardless of whether it's still on disk. Used to tell a trusted-but-now-missing binary (an
+ * app update/uninstall pruning an old version — expected churn) apart from a real watchPaths
+ * deletion (~/.ssh, /etc/passwd, credentials/ — always suspicious) when a file drops out of the
+ * baseline. Only reads the key set, not the (now nested, per-destination) values, so this stays
+ * unaffected by how network.ts structures its own trust data internally.
  */
-function getTrustedProcessPaths(dataDir: string): string[] {
+function getTrustedProcessKeys(dataDir: string): Set<string> {
 	const firstSeen = readJson<Record<string, unknown>>(
 		`${dataDir}/outbound-first-seen.json`,
 		{},
 	);
-	return Object.keys(firstSeen).filter((p) => {
+	return new Set(Object.keys(firstSeen));
+}
+
+function getTrustedProcessPaths(dataDir: string): string[] {
+	return [...getTrustedProcessKeys(dataDir)].filter((p) => {
 		try {
 			return statSync(p).isFile();
 		} catch {
@@ -107,7 +112,7 @@ export function createFimModule(ctx: ModuleContext): Module {
 				watchers.push(watcher);
 				watchedTrustedPaths.add(path);
 			} catch (err) {
-				console.warn(`[fim] failed to watch trusted binary ${path}:`, err);
+				console.warn("[fim] failed to watch trusted binary:", path, err);
 			}
 		}
 	}
@@ -125,6 +130,9 @@ export function createFimModule(ctx: ModuleContext): Module {
 		const isFirstRun =
 			Object.keys(oldBaseline).length === 0 && !existsSync(baselinePath);
 
+		const trustedProcessKeys = config.fim.watchTrustedProcessBinaries
+			? getTrustedProcessKeys(config.dataDir)
+			: new Set<string>();
 		const trustedProcessPaths = config.fim.watchTrustedProcessBinaries
 			? getTrustedProcessPaths(config.dataDir)
 			: [];
@@ -141,12 +149,29 @@ export function createFimModule(ctx: ModuleContext): Module {
 
 			for (const path of oldPaths) {
 				if (!newPaths.has(path)) {
-					recorder.record({
-						module: "fim",
-						severity: "critical",
-						summary: `Watched file deleted: ${path}`,
-						detail: { path, previous: oldBaseline[path] },
-					});
+					if (trustedProcessKeys.has(path)) {
+						// A trusted-process binary disappearing isn't itself a tamper signal —
+						// tampering shows up as a content change on a binary that's still present
+						// (handled above). This is far more often an app's own updater pruning an
+						// old version (e.g. Claude Code's ~/.local/share/claude/versions/*).
+						recorder.record({
+							module: "fim",
+							severity: "warning",
+							summary: `Trusted process binary removed: ${path}`,
+							detail: {
+								path,
+								previous: oldBaseline[path],
+								note: "Likely an app update or uninstall pruning an old version.",
+							},
+						});
+					} else {
+						recorder.record({
+							module: "fim",
+							severity: "critical",
+							summary: `Watched file deleted: ${path}`,
+							detail: { path, previous: oldBaseline[path] },
+						});
+					}
 				}
 			}
 			for (const path of newPaths) {
@@ -215,7 +240,8 @@ export function createFimModule(ctx: ModuleContext): Module {
 				watchers.push(watcher);
 			} catch (err) {
 				console.warn(
-					`[fim] failed to watch ${root}, relying on periodic reconcile only:`,
+					"[fim] failed to watch, relying on periodic reconcile only:",
+					root,
 					err,
 				);
 			}

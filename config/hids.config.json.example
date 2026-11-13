@@ -39,5 +39,17 @@
     "url": "https://hc-ping.com/YOUR-CHECK-UUID-HERE",
     "intervalMs": 120000,
     "apiKey": "YOUR-READ-ONLY-API-KEY-HERE"
+  },
+  "agent": {
+    "enabled": true,
+    "model": "claude-sonnet-5",
+    "intervalMs": 300000,
+    "apiKeyEnvPath": "/home/nate/Claude_Code/Projects/HAL/hal-skeleton/credentials/anthropic.env"
+  },
+  "signatureDb": {
+    "enabled": false,
+    "feed": "recent",
+    "refreshIntervalMs": 21600000,
+    "authKeyEnvPath": "/home/nate/Claude_Code/Projects/HAL/hal-skeleton/credentials/malwarebazaar.env"
   }
 }

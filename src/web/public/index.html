@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>HIDS Dashboard</title>
+<title>Sibyl Dashboard</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -98,6 +98,27 @@
   .wl-form .wl-value { flex: 1; min-width: 140px; }
   .wl-form .wl-note { width: 140px; }
   h2 { margin-top: 2rem; }
+  details.section { margin-top: 2rem; }
+  details.section summary {
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.5rem 0;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    user-select: none;
+  }
+  details.section summary::-webkit-details-marker { display: none; }
+  details.section summary::before {
+    content: "▸";
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  details.section[open] summary::before { transform: rotate(90deg); }
   .bulk-actions { margin: 0.5rem 0; }
   .bulk-actions button:disabled { opacity: 0.5; cursor: default; }
   input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
@@ -116,11 +137,16 @@
 </style>
 </head>
 <body>
-  <h1>HIDS Dashboard</h1>
+  <h1>Sibyl Dashboard</h1>
   <div id="liveness-banner" class="banner liveness ok">Loading…</div>
   <div id="banner" class="banner clear">Loading…</div>
   <div id="remote-banner" class="banner remote unknown" style="display:none"></div>
-  <div id="status" class="grid"></div>
+
+  <details class="section" open>
+    <summary>Module Status</summary>
+    <div id="status" class="grid"></div>
+  </details>
+
   <div class="filter-bar">
     <label>Module
       <select id="filter-module" onchange="applyFilters()">
@@ -144,18 +170,27 @@
     </label>
     <span class="filter-hint">Applies to Recent Alerts &amp; Suppressed Events below</span>
   </div>
-  <h2>Recent Alerts</h2>
-  <div class="bulk-actions">
-    <button id="bulk-whitelist-btn" onclick="bulkWhitelist()" disabled>Whitelist Selected (0)</button>
-  </div>
-  <div id="alerts"></div>
-  <h2>Whitelist</h2>
-  <div id="whitelist"></div>
-  <h2>Suppressed Events</h2>
-  <div class="bulk-actions">
-    <button id="bulk-unwhitelist-btn" onclick="bulkUnwhitelist()" disabled>Unwhitelist Selected (0)</button>
-  </div>
-  <div id="suppressed"></div>
+
+  <details class="section" open>
+    <summary>Recent Alerts</summary>
+    <div class="bulk-actions">
+      <button type="button" id="bulk-whitelist-btn" onclick="bulkWhitelist()" disabled>Whitelist Selected (0)</button>
+    </div>
+    <div id="alerts"></div>
+  </details>
+
+  <details class="section">
+    <summary>Whitelist</summary>
+    <div id="whitelist"></div>
+  </details>
+
+  <details class="section">
+    <summary>Suppressed Events</summary>
+    <div class="bulk-actions">
+      <button type="button" id="bulk-unwhitelist-btn" onclick="bulkUnwhitelist()" disabled>Unwhitelist Selected (0)</button>
+    </div>
+    <div id="suppressed"></div>
+  </details>
 
 <script>
 function formatDuration(ms) {
@@ -169,8 +204,8 @@ function formatDuration(ms) {
 const WHITELISTABLE_MODULES = ['network', 'fim', 'process'];
 let alertsById = new Map();
 let suppressedById = new Map();
-let selectedAlertIds = new Set();
-let selectedSuppressedIds = new Set();
+const selectedAlertIds = new Set();
+const selectedSuppressedIds = new Set();
 
 // Full, unfiltered data from the last poll — filtering re-renders from these instead of
 // re-fetching, so typing in the search box doesn't hit the network on every keystroke.
@@ -191,16 +226,19 @@ function passesFilters(a) {
   return true;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 function applyFilters() {
   renderAlertsTable();
   renderSuppressedTable();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 function toggleAlertSelect(id, checked) {
   if (checked) selectedAlertIds.add(id); else selectedAlertIds.delete(id);
   updateBulkButtons();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 function toggleSuppressedSelect(id, checked) {
   if (checked) selectedSuppressedIds.add(id); else selectedSuppressedIds.delete(id);
   updateBulkButtons();
@@ -216,6 +254,7 @@ function updateBulkButtons() {
   unwlBtn.textContent = `Unwhitelist Selected (${selectedSuppressedIds.size})`;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 async function bulkWhitelist() {
   const seen = new Set();
   const rules = [];
@@ -239,11 +278,12 @@ async function bulkWhitelist() {
   refresh();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 async function bulkUnwhitelist() {
   const ruleIds = new Set();
   for (const id of selectedSuppressedIds) {
     const a = suppressedById.get(id);
-    if (a && a.whitelistRuleId) ruleIds.add(a.whitelistRuleId);
+    if (a?.whitelistRuleId) ruleIds.add(a.whitelistRuleId);
   }
   await Promise.all([...ruleIds].map(rid => fetch(`/api/whitelist/${rid}`, { method: 'DELETE' })));
   selectedSuppressedIds.clear();
@@ -260,6 +300,7 @@ function defaultWhitelistField(module) {
   return module === 'fim' ? 'path' : 'exePath';
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 function showWhitelistForm(alertId) {
   const a = alertsById.get(alertId);
   if (!a) return;
@@ -271,12 +312,13 @@ function showWhitelistForm(alertId) {
       <input class="wl-field" type="text" value="${escapeHtml(field)}" />
       <input class="wl-value" type="text" value="${escapeHtml(value)}" />
       <input class="wl-note" type="text" placeholder="note (optional)" />
-      <button onclick="submitWhitelist('${alertId}')">Add</button>
-      <button onclick="refresh()">Cancel</button>
+      <button type="button" onclick="submitWhitelist('${alertId}')">Add</button>
+      <button type="button" onclick="refresh()">Cancel</button>
     </div>
   `;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 async function submitWhitelist(alertId) {
   const a = alertsById.get(alertId);
   const cell = document.getElementById(`wl-row-${alertId}`);
@@ -292,6 +334,7 @@ async function submitWhitelist(alertId) {
   refresh();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from onclick= attributes rendered into the DOM
 async function removeRule(id) {
   await fetch(`/api/whitelist/${id}`, { method: 'DELETE' });
   refresh();
@@ -383,7 +426,7 @@ async function refresh() {
               <td>${r.note ? escapeHtml(r.note) : ''}</td>
               <td>${r.matchCount}</td>
               <td>${r.lastMatchedAt ? new Date(r.lastMatchedAt).toLocaleString() : 'never'}</td>
-              <td><button onclick="removeRule('${r.id}')">Remove</button></td>
+              <td><button type="button" onclick="removeRule('${r.id}')">Remove</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -424,7 +467,7 @@ function renderAlertsTable() {
             <td>${a.summary}</td>
             <td id="wl-row-${a.id}">${
               WHITELISTABLE_MODULES.includes(a.module)
-                ? `<button onclick="showWhitelistForm('${a.id}')">Whitelist</button>`
+                ? `<button type="button" onclick="showWhitelistForm('${a.id}')">Whitelist</button>`
                 : ''
             }</td>
           </tr>
@@ -466,7 +509,7 @@ function renderSuppressedTable() {
               <td>${ruleLabel}</td>
               <td>${
                 rule
-                  ? `<button onclick="removeRule('${rule.id}')">Unwhitelist</button>`
+                  ? `<button type="button" onclick="removeRule('${rule.id}')">Unwhitelist</button>`
                   : ''
               }</td>
             </tr>

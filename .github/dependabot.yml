@@ -1,0 +1,15 @@
+# Dependabot — the gate that keeps running after you stop looking. Bun projects use the `bun` ecosystem,
+# not `npm`: npm edits package.json only and leaves bun.lock stale, which fails CI's frozen install.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday", time: "06:00", timezone: "America/New_York" }
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday", time: "06:00", timezone: "America/New_York" }
