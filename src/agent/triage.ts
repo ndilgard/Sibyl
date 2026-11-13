@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadEnv } from "../alert/email.ts";
 import type { Finding } from "../alert/policy.ts";
 import type { Module, ModuleContext } from "../modules/types.ts";
+import type { Incident } from "../state/correlate.ts";
 import { type Alert, getAlerts } from "../state/history-db.ts";
 import {
 	getTriagedAlertIds,
@@ -52,6 +53,7 @@ export interface TriageResult {
 
 export interface TriageClient {
 	judge(alert: Alert): Promise<TriageResult>;
+	generateReport(incident: Incident, alerts: Alert[]): Promise<string>;
 }
 
 export function buildUserMessage(alert: Alert): string {
@@ -274,27 +276,32 @@ export interface MessagesLike {
 
 const MAX_TOOL_ROUNDS = 3;
 
-/** The actual tool-calling loop: reasons about a finding, optionally calls one of the available
- * tools one or more times (fed back into the conversation), and returns once the model gives a
- * final verdict with no further tool requests. Exported so tests can inject a fake `messagesApi`
- * and fake tool runners and exercise the loop's turn-taking without touching the real SDK or real
- * system commands. Dispatches purely by tool name — adding a new tool means adding it to
- * `ALL_TOOLS` and to whatever `ToolRunners` map gets passed in, nothing in this loop changes. */
-export async function runTriageConversation(
+/** The shared tool-calling loop underneath both the per-alert triage conversation and the
+ * per-incident report conversation: reasons about the input, optionally calls one of the
+ * available tools one or more times (fed back into the conversation), and returns once the model
+ * gives a final response with no further tool requests. `parseFinal` turns that final text block
+ * into the caller's result type, or returns null for "couldn't make sense of this" — treated the
+ * same as a missing/malformed response (throws, which both callers' upstream code treats as a
+ * fail-safe "unreviewed" outcome rather than guessing). Dispatches tools purely by name — adding
+ * a new tool means adding it to `ALL_TOOLS` and to whatever `ToolRunners` map gets passed in,
+ * nothing in this loop changes. */
+async function runToolLoop<T>(
 	messagesApi: MessagesLike,
 	model: string,
+	systemPrompt: string,
+	maxTokens: number,
 	tools: ToolRunners,
-	alert: Alert,
-): Promise<TriageResult> {
-	const messages: Array<{ role: string; content: unknown }> = [
-		{ role: "user", content: buildUserMessage(alert) },
-	];
+	initialMessages: Array<{ role: string; content: unknown }>,
+	parseFinal: (text: string) => T | null,
+	exceededRoundsLabel: string,
+): Promise<T> {
+	const messages = [...initialMessages];
 
 	for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 		const response = await messagesApi.create({
 			model,
-			max_tokens: 500,
-			system: TRIAGE_SYSTEM_PROMPT,
+			max_tokens: maxTokens,
+			system: systemPrompt,
 			tools: ALL_TOOLS,
 			messages,
 		});
@@ -306,10 +313,10 @@ export async function runTriageConversation(
 			if (!textBlock || typeof textBlock.text !== "string") {
 				throw new Error("Anthropic response contained no text content");
 			}
-			const result = parseVerdict(textBlock.text);
+			const result = parseFinal(textBlock.text);
 			if (!result) {
 				throw new Error(
-					`Could not parse model response as a verdict: ${textBlock.text.slice(0, 200)}`,
+					`Could not parse model response as ${exceededRoundsLabel}: ${textBlock.text.slice(0, 200)}`,
 				);
 			}
 			return result;
@@ -342,7 +349,117 @@ export async function runTriageConversation(
 	}
 
 	throw new Error(
-		`Triage conversation exceeded ${MAX_TOOL_ROUNDS} tool-call rounds without a final verdict`,
+		`Conversation exceeded ${MAX_TOOL_ROUNDS} tool-call rounds without a final ${exceededRoundsLabel}`,
+	);
+}
+
+/** Reasons about a single finding, optionally using the available tools, and returns a final
+ * alarming/benign verdict. Exported so tests can inject a fake `messagesApi` and fake tool
+ * runners and exercise the loop's turn-taking without touching the real SDK or real system
+ * commands. */
+export async function runTriageConversation(
+	messagesApi: MessagesLike,
+	model: string,
+	tools: ToolRunners,
+	alert: Alert,
+): Promise<TriageResult> {
+	return runToolLoop(
+		messagesApi,
+		model,
+		TRIAGE_SYSTEM_PROMPT,
+		500,
+		tools,
+		[{ role: "user", content: buildUserMessage(alert) }],
+		parseVerdict,
+		"verdict",
+	);
+}
+
+const REPORT_SYSTEM_PROMPT = `You are a security analyst writing an investigation report for a personal Host Intrusion Detection System (HIDS). You've been given a GROUP of alerts from different detection modules that were correlated together because they happened close in time and shared a real identifier (the same executable path, process ID, parent directory, or IP address) — this group represents one suspected incident, not several unrelated findings. You have the same three tools available as single-alert triage — whois_lookup, reverse_dns_lookup, and check_package_ownership — use them whenever they'd let you ground the report in real evidence instead of speculation.
+
+Write a report with exactly these three sections, in this order, as plain text with these literal headings:
+
+TIMELINE
+A chronological, one-line-per-alert list (earliest first) of what happened and when, e.g. "12:00:00 — fim: Watched file modified: /usr/bin/evil-cron".
+
+EVIDENCE PER MODULE
+For each module involved, a short paragraph of what that module's alert(s) actually showed (summary + the relevant pieces of its detail) and anything a tool lookup added.
+
+NARRATIVE
+A few sentences tying the timeline and evidence together into one coherent story of what most likely happened and why it was correlated into a single incident — name the shared identifier that linked them. If the evidence doesn't actually support treating this as a real incident (a benign explanation ties every piece together), say so plainly here rather than manufacturing alarm.
+
+Respond with ONLY the report text in that exact three-section shape — no JSON, no markdown code fences, no preamble or sign-off before/after the three sections.`;
+
+export function buildIncidentUserMessage(
+	incident: Incident,
+	alerts: Alert[],
+): string {
+	const byId = new Map(alerts.map((a) => [a.id, a]));
+	const ordered = incident.alertIds
+		.map((id) => byId.get(id))
+		.filter((a): a is Alert => a !== undefined)
+		.sort((a, b) => a.ts.localeCompare(b.ts));
+
+	const alertLines = ordered.map((a) =>
+		[
+			`Module: ${a.module}`,
+			`Time: ${a.ts}`,
+			`Severity: ${a.severity}`,
+			`Summary: ${a.summary}`,
+			`Detail: ${JSON.stringify(a.detail)}`,
+		].join("\n"),
+	);
+
+	return [
+		`Shared identifier that linked these alerts: ${incident.sharedIdentifier}`,
+		`Modules involved: ${incident.modules.join(", ")}`,
+		`Window: ${incident.windowStart} to ${incident.windowEnd}`,
+		"",
+		"Alerts in this incident (chronological):",
+		...alertLines,
+	].join("\n");
+}
+
+/** Validates the model's final report text is non-empty and contains all three required section
+ * headings — doesn't parse/split the sections out (the email template just renders the whole
+ * text), just confirms the model actually followed the structure rather than returning something
+ * unusable. Returns null (treated as a fail-safe-worthy parse failure by runToolLoop) if the
+ * shape doesn't hold. */
+export function validateIncidentReport(raw: string): string | null {
+	const trimmed = raw.trim();
+	if (trimmed.length === 0) return null;
+	if (
+		!trimmed.includes("TIMELINE") ||
+		!trimmed.includes("EVIDENCE PER MODULE") ||
+		!trimmed.includes("NARRATIVE")
+	) {
+		return null;
+	}
+	return trimmed;
+}
+
+/** Reasons about a correlated group of alerts (an `Incident`, built by correlate.ts) and returns
+ * a structured investigation report as plain text. Same tool access and same fail-safe-on-failure
+ * contract as `runTriageConversation` — an API failure, unparseable response, or exceeding the
+ * tool-round cap throws, which the caller (incident-store.ts wiring, step 6) must record as
+ * `unreviewed` rather than silently dropping or emailing a report claiming confidence it doesn't
+ * have. */
+export async function runIncidentReportConversation(
+	messagesApi: MessagesLike,
+	model: string,
+	tools: ToolRunners,
+	incident: Incident,
+	alerts: Alert[],
+): Promise<string> {
+	return runToolLoop(
+		messagesApi,
+		model,
+		REPORT_SYSTEM_PROMPT,
+		1500,
+		tools,
+		[{ role: "user", content: buildIncidentUserMessage(incident, alerts) }],
+		validateIncidentReport,
+		"investigation report",
 	);
 }
 
@@ -356,6 +473,14 @@ function createAnthropicClient(apiKey: string, model: string): TriageClient {
 				model,
 				tools,
 				alert,
+			),
+		generateReport: (incident: Incident, alerts: Alert[]) =>
+			runIncidentReportConversation(
+				client.messages as unknown as MessagesLike,
+				model,
+				tools,
+				incident,
+				alerts,
 			),
 	};
 }

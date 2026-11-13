@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Mailer } from "../alert/email.ts";
 import { AlertRecorder } from "../alert/policy.ts";
 import type { HidsConfig } from "../config.ts";
+import type { Incident } from "../state/correlate.ts";
 import {
 	type Alert,
 	type HistoryStore,
@@ -13,6 +14,7 @@ import {
 } from "../state/history-db.ts";
 import { getVerdictByAlertId } from "../state/triage-store.ts";
 import {
+	buildIncidentUserMessage,
 	buildUserMessage,
 	createSystemToolRunners,
 	createTriageModule,
@@ -20,9 +22,11 @@ import {
 	isValidIp,
 	type MessagesLike,
 	parseVerdict,
+	runIncidentReportConversation,
 	runTriageConversation,
 	type ToolRunners,
 	type TriageClient,
+	validateIncidentReport,
 } from "./triage.ts";
 
 let db: HistoryStore;
@@ -125,7 +129,12 @@ describe("parseVerdict", () => {
 
 describe("createTriageModule — scanNow", () => {
 	function fakeClient(judge: TriageClient["judge"]): TriageClient {
-		return { judge };
+		return {
+			judge,
+			generateReport: async () => {
+				throw new Error("generateReport not used by these scanNow tests");
+			},
+		};
 	}
 
 	test("an alarming warning finding gets escalated (emailed)", async () => {
@@ -568,6 +577,217 @@ describe("runTriageConversation", () => {
 			fakeAlert(),
 		);
 		expect(seen).toEqual(["reverse_dns_lookup"]);
+	});
+});
+
+describe("buildIncidentUserMessage", () => {
+	function fakeFimAlert(): Alert {
+		return {
+			id: "a1",
+			ts: "2026-11-09T12:00:00.000Z",
+			module: "fim",
+			severity: "warning",
+			summary: "Watched file modified",
+			detail: { path: "/usr/bin/evil-cron" },
+			emailed: false,
+		};
+	}
+
+	function fakeNetworkAlert(): Alert {
+		return {
+			id: "a2",
+			ts: "2026-11-09T12:00:05.000Z",
+			module: "network",
+			severity: "warning",
+			summary: "known process, new destination",
+			detail: { exePath: "/usr/bin/evil-cron", remoteAddress: "203.0.113.5" },
+			emailed: false,
+		};
+	}
+
+	function fakeIncident(): Incident {
+		return {
+			id: "incident-1",
+			alertIds: ["a1", "a2"],
+			modules: ["fim", "network"],
+			sharedIdentifier: "exePath:/usr/bin/evil-cron",
+			windowStart: "2026-11-09T12:00:00.000Z",
+			windowEnd: "2026-11-09T12:00:05.000Z",
+		};
+	}
+
+	test("orders alerts chronologically and includes the shared identifier", () => {
+		// Passed out of order deliberately — the function must sort by ts, not input order.
+		const message = buildIncidentUserMessage(fakeIncident(), [
+			fakeNetworkAlert(),
+			fakeFimAlert(),
+		]);
+
+		const fimIndex = message.indexOf("Module: fim");
+		const networkIndex = message.indexOf("Module: network");
+		expect(fimIndex).toBeGreaterThan(-1);
+		expect(networkIndex).toBeGreaterThan(fimIndex);
+		expect(message).toContain("exePath:/usr/bin/evil-cron");
+		expect(message).toContain("fim, network");
+	});
+
+	test("silently skips an alertId with no matching alert (shouldn't happen, but no crash)", () => {
+		const incident = { ...fakeIncident(), alertIds: ["a1", "ghost"] };
+		const message = buildIncidentUserMessage(incident, [fakeFimAlert()]);
+		expect(message).toContain("Module: fim");
+		expect(message).not.toContain("ghost");
+	});
+});
+
+describe("validateIncidentReport", () => {
+	test("accepts a report with all three required sections", () => {
+		const report =
+			"TIMELINE\n...\n\nEVIDENCE PER MODULE\n...\n\nNARRATIVE\n...";
+		expect(validateIncidentReport(report)).toBe(report);
+	});
+
+	test("rejects an empty response", () => {
+		expect(validateIncidentReport("   ")).toBeNull();
+	});
+
+	test("rejects a response missing a required section", () => {
+		expect(
+			validateIncidentReport("TIMELINE\n...\n\nNARRATIVE\n..."),
+		).toBeNull();
+	});
+});
+
+describe("runIncidentReportConversation", () => {
+	function fakeIncident(): Incident {
+		return {
+			id: "incident-1",
+			alertIds: ["a1", "a2"],
+			modules: ["fim", "network"],
+			sharedIdentifier: "exePath:/usr/bin/evil-cron",
+			windowStart: "2026-11-09T12:00:00.000Z",
+			windowEnd: "2026-11-09T12:00:05.000Z",
+		};
+	}
+
+	function fakeAlerts(): Alert[] {
+		return [
+			{
+				id: "a1",
+				ts: "2026-11-09T12:00:00.000Z",
+				module: "fim",
+				severity: "warning",
+				summary: "Watched file modified",
+				detail: { path: "/usr/bin/evil-cron" },
+				emailed: false,
+			},
+			{
+				id: "a2",
+				ts: "2026-11-09T12:00:05.000Z",
+				module: "network",
+				severity: "warning",
+				summary: "known process, new destination",
+				detail: { exePath: "/usr/bin/evil-cron", remoteAddress: "203.0.113.5" },
+				emailed: false,
+			},
+		];
+	}
+
+	function textResponse(text: string) {
+		return { content: [{ type: "text", text }] };
+	}
+
+	function toolUseResponse(id: string, name: string, input: unknown) {
+		return { content: [{ type: "tool_use", id, name, input }] };
+	}
+
+	const validReport =
+		"TIMELINE\n12:00:00 — fim: modified\n\nEVIDENCE PER MODULE\nfim: ...\n\nNARRATIVE\nLikely tampering.";
+
+	test("no tool use requested — returns the final report text directly", async () => {
+		const messagesApi: MessagesLike = {
+			create: async () => textResponse(validReport),
+		};
+
+		const result = await runIncidentReportConversation(
+			messagesApi,
+			"claude-sonnet-5",
+			{},
+			fakeIncident(),
+			fakeAlerts(),
+		);
+		expect(result).toContain("NARRATIVE");
+	});
+
+	test("one whois_lookup round-trip, then a final report", async () => {
+		let call = 0;
+		let capturedMessages: unknown;
+		const messagesApi: MessagesLike = {
+			create: async (params) => {
+				call++;
+				if (call === 1) {
+					return toolUseResponse("tool-1", "whois_lookup", {
+						ip: "203.0.113.5",
+					});
+				}
+				capturedMessages = (params as { messages: unknown }).messages;
+				return textResponse(validReport);
+			},
+		};
+		let lookedUp = "";
+		const tools: ToolRunners = {
+			whois_lookup: async (input) => {
+				lookedUp = input.ip as string;
+				return "OrgName: Example Hosting";
+			},
+		};
+
+		const result = await runIncidentReportConversation(
+			messagesApi,
+			"claude-sonnet-5",
+			tools,
+			fakeIncident(),
+			fakeAlerts(),
+		);
+
+		expect(lookedUp).toBe("203.0.113.5");
+		expect(result).toContain("NARRATIVE");
+		expect(JSON.stringify(capturedMessages)).toContain("Example Hosting");
+	});
+
+	test("a malformed report (missing required sections) throws", async () => {
+		const messagesApi: MessagesLike = {
+			create: async () => textResponse("Just a summary, no sections."),
+		};
+
+		await expect(
+			runIncidentReportConversation(
+				messagesApi,
+				"claude-sonnet-5",
+				{},
+				fakeIncident(),
+				fakeAlerts(),
+			),
+		).rejects.toThrow(/Could not parse model response/);
+	});
+
+	test("exceeding the max tool rounds throws", async () => {
+		const messagesApi: MessagesLike = {
+			create: async () =>
+				toolUseResponse("tool-x", "whois_lookup", { ip: "1.1.1.1" }),
+		};
+		const tools: ToolRunners = {
+			whois_lookup: async () => "some whois text",
+		};
+
+		await expect(
+			runIncidentReportConversation(
+				messagesApi,
+				"claude-sonnet-5",
+				tools,
+				fakeIncident(),
+				fakeAlerts(),
+			),
+		).rejects.toThrow(/exceeded 3 tool-call rounds/);
 	});
 });
 

@@ -60,10 +60,14 @@ reasoning, not just alert-and-forward.
 storage, email surfacing, build order) in `~/.claude/plans/hids-cross-module-correlation.md` —
 read that back before continuing, don't re-derive.
 
-Steps 1-4 done (2026-11-09): `src/state/identifiers.ts`, `src/state/correlate.ts` (union-find
+Steps 1-5 done (2026-11-12): `src/state/identifiers.ts`, `src/state/correlate.ts` (union-find
 grouping so an incident can chain through more than one shared identifier), and
 `src/state/incident-store.ts` (append-only JSONL, mirrors `triage-store.ts`) all built and
-tested — 29 tests passing. Next: step 5, extend `triage.ts` with the report-generation path.
+tested, plus `src/agent/triage.ts` now has `runIncidentReportConversation()` — turns a
+correlated `Incident` + its alerts into a three-section (timeline/evidence/narrative) report
+using the same tools and fail-safe contract as per-alert triage. 38 tests passing total across
+this item. Next: step 6, wire correlation into the triage cycle + new "Investigation Report"
+email template.
 
 ## 7. Human-confirmed response recommendations
 
